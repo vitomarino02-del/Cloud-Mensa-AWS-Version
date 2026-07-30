@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+
+# Node / frontend
+node_modules/
+dist/
+
+# Terraform (lo stato non si committa mai)
+.terraform/
+terraform.tfstate
+terraform.tfstate.backup
+.cloud-init.generated.yaml
+
+# Ansible (file generati: inventory da Terraform, kubeconfig dal playbook)
+inventory.ini
+kubeconfig
+
+# Varie
+.env

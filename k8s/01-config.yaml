@@ -1,0 +1,11 @@
+# Configurazione non sensibile. Le connection string (con password) stanno
+# invece nel Secret 'mensa-secrets', creato da deploy.sh leggendo SSM.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mensa-config
+  namespace: mensa
+data:
+  STORAGE_BACKEND: s3 # in locale era 'local': stesso codice, storage diverso
+  S3_BUCKET: mensa-images-862087104689
+  AWS_REGION: eu-central-1

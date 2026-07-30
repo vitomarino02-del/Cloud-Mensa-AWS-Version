@@ -1,0 +1,22 @@
+# kitchen-service: consumer degli eventi da Amazon MQ. Nessun Service.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kitchen-service
+  namespace: mensa
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: kitchen-service }
+  template:
+    metadata:
+      labels: { app: kitchen-service }
+    spec:
+      imagePullSecrets:
+        - name: ecr-creds
+      containers:
+        - name: kitchen-service
+          image: 862087104689.dkr.ecr.eu-central-1.amazonaws.com/mensa/kitchen-service:1.0
+          envFrom:
+            - configMapRef: { name: mensa-config }
+            - secretRef: { name: mensa-secrets }
