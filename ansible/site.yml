@@ -70,6 +70,13 @@
       command: apt-mark hold kubelet kubeadm kubectl
       changed_when: false
 
+    # serve al control plane per rigenerare il token ECR durante il deploy
+    # automatico lanciato da GitHub Actions via SSM
+    - name: Installa la AWS CLI
+      snap:
+        name: aws-cli
+        classic: true
+
   handlers:
     - name: applica sysctl
       command: sysctl --system

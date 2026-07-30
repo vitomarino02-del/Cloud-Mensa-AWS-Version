@@ -1,0 +1,79 @@
+name: build e deploy su AWS
+
+# Ad ogni push su main: build delle immagini, push su ECR e aggiornamento
+# dei Deployment sul cluster.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # avvio manuale dalla scheda Actions
+
+env:
+  AWS_REGION: eu-central-1
+  PROJECT: mensa
+
+permissions:
+  id-token: write # necessario per OIDC
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Nessuna chiave AWS: il token OIDC di GitHub viene scambiato con
+      # credenziali temporanee del ruolo IAM.
+      - name: Autenticazione su AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login su ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build e push delle immagini
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          TAG: ${{ github.sha }} # tag = commit, cosi' ogni deploy e' tracciabile
+        run: |
+          for s in menu-service order-service kitchen-service frontend; do
+            docker build -t $REGISTRY/$PROJECT/$s:$TAG ./$s
+            docker push $REGISTRY/$PROJECT/$s:$TAG
+          done
+
+      # L'API server accetta connessioni solo dall'IP dello sviluppatore,
+      # quindi il deploy non parte dal runner: si esegue kubectl sul control
+      # plane tramite SSM Run Command.
+      - name: Aggiorna i Deployment sul cluster
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          TAG: ${{ github.sha }}
+        run: |
+          CP_ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=$PROJECT-cp" "Name=instance-state-name,Values=running" \
+            --query "Reservations[0].Instances[0].InstanceId" --output text)
+          echo "control plane: $CP_ID"
+
+          CMD=$(aws ssm send-command \
+            --instance-ids "$CP_ID" \
+            --document-name "AWS-RunShellScript" \
+            --comment "deploy $TAG" \
+            --parameters commands="[
+              \"export KUBECONFIG=/etc/kubernetes/admin.conf\",
+              \"kubectl -n mensa delete secret ecr-creds --ignore-not-found\",
+              \"kubectl -n mensa create secret docker-registry ecr-creds --docker-server=$REGISTRY --docker-username=AWS --docker-password=\$(aws ecr get-login-password --region $AWS_REGION)\",
+              \"kubectl -n mensa set image deployment/menu-service menu-service=$REGISTRY/$PROJECT/menu-service:$TAG\",
+              \"kubectl -n mensa set image deployment/order-service order-service=$REGISTRY/$PROJECT/order-service:$TAG\",
+              \"kubectl -n mensa set image deployment/kitchen-service kitchen-service=$REGISTRY/$PROJECT/kitchen-service:$TAG\",
+              \"kubectl -n mensa set image deployment/frontend frontend=$REGISTRY/$PROJECT/frontend:$TAG\",
+              \"kubectl -n mensa rollout status deployment/frontend --timeout=180s\"
+            ]" \
+            --query "Command.CommandId" --output text)
+
+          echo "comando SSM: $CMD"
+          sleep 60
+          aws ssm get-command-invocation --command-id "$CMD" --instance-id "$CP_ID" \
+            --query "{stato:Status,output:StandardOutputContent,errore:StandardErrorContent}"
