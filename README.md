@@ -8,8 +8,7 @@ La cosa che mi interessava dimostrare è che **il codice dell'applicazione non �
 cambiato di una riga**. Tutta la configurazione arriva dall'ambiente, quindi per
 passare dal cluster sul portatile ad AWS è bastato cambiare le variabili:
 `DATABASE_URL` ora punta a RDS invece che al pod postgres, `STORAGE_BACKEND`
-passa da `local` a `s3` e il codice boto3 che avevo scritto in Fase 1 (e che fino
-a ieri non serviva a niente) inizia a scrivere su un bucket vero.
+passa da `local` a `s3` e il codice boto3 presente nella versione locale inizia a scrivere su un bucket vero.
 
 ![Architettura su AWS](architettura-aws.png)
 
