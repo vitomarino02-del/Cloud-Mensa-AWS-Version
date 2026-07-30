@@ -240,9 +240,9 @@ resource "aws_s3_bucket_public_access_block" "images" {
   bucket = aws_s3_bucket.images.id
 
   block_public_acls       = true
-  block_public_policy     = true
+  block_public_policy     = false
   ignore_public_acls      = true
-  restrict_public_buckets = true
+  restrict_public_buckets = false
 }
 
 # Password generate da Terraform, non scritte nel codice.
@@ -552,3 +552,23 @@ output "ecr_registry" {
 }
 
 data "aws_caller_identity" "current" {}
+
+# Le foto dei piatti devono essere visibili dal browser: policy di sola
+# lettura sugli oggetti. Le chiavi sono uuid casuali e nessuno puo' scrivere
+# nel bucket dall'esterno. In alternativa si sarebbero potuti usare presigned
+# URL, tenendo il bucket completamente privato.
+resource "aws_s3_bucket_policy" "images_public_read" {
+  bucket     = aws_s3_bucket.images.id
+  depends_on = [aws_s3_bucket_public_access_block.images]
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "PublicReadGetObject"
+      Effect    = "Allow"
+      Principal = "*"
+      Action    = "s3:GetObject"
+      Resource  = "${aws_s3_bucket.images.arn}/*"
+    }]
+  })
+}
