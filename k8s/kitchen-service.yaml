@@ -1,4 +1,4 @@
-# kitchen-service: consumer degli eventi da Amazon MQ. Nessun Service.
+# kitchen-service: consumer degli eventi da Amazon MQ Nessun Service
 apiVersion: apps/v1
 kind: Deployment
 metadata:

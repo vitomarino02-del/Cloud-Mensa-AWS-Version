@@ -1,5 +1,5 @@
 # frontend: Nginx + SPA. NodePort 30080, la porta a cui punta il target group
-# del Network Load Balancer creato da Terraform.
+# del Network Load Balancer creato da Terraform
 apiVersion: apps/v1
 kind: Deployment
 metadata:

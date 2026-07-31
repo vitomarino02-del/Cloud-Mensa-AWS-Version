@@ -1,4 +1,4 @@
-# order-service: 2 repliche. Usa RDS, ElastiCache e Amazon MQ (endpoint nel Secret).
+# order-service: 2 repliche; Usa RDS, ElastiCache e Amazon MQ (endpoint nel Secret)
 apiVersion: apps/v1
 kind: Deployment
 metadata:

@@ -62,8 +62,7 @@ Servono AWS CLI configurata, Terraform, Ansible, kubectl, Docker e una chiave SS
 in `~/.ssh/id_rsa`. Io lavoro da WSL2 perché Ansible su Windows nativo non gira.
 
 Il backend dello stato va creato a mano una volta sola, prima del primo `init`
-(problema dell'uovo e della gallina: Terraform non può creare il bucket in cui
-salverà il proprio stato):
+
 
 ```
 aws s3api create-bucket --bucket mensa-tfstate-<ACCOUNT_ID> --region eu-central-1 \
@@ -97,7 +96,7 @@ output app_url` stampa l'indirizzo del load balancer.
 Avviso sui tempi: RDS ci ha messo mezz'ora buona a nascere e Amazon MQ una decina
 di minuti, quindi il primo `apply` non è una cosa da fare di fretta.
 
-## Cose che ho scoperto strada facendo
+## Imprevisti ed errori incontrati
 
 **mq.t3.micro non esiste più per RabbitMQ.** Amazon MQ lo supporta solo con
 ActiveMQ; per RabbitMQ il taglio più piccolo disponibile è `mq.m7g.medium`, che

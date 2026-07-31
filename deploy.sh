@@ -1,8 +1,8 @@
 #!/bin/bash
 # Deploy dell'app sul cluster EC2.
 # Crea i due Secret necessari (credenziali dei servizi gestiti e token ECR)
-# e applica i manifest. Le password non sono mai nel repo: si leggono da SSM.
-# Uso: ./deploy.sh
+# e applica i manifest. Le password non sono mai nel repo: si leggono da SSM
+# +++ Uso: ./deploy.sh
 set -e
 
 REGION="eu-central-1"
@@ -22,7 +22,7 @@ kubectl -n mensa create secret generic mensa-secrets \
   --from-literal=RABBITMQ_URL="$RABBITMQ_URL" \
   --dry-run=client -o yaml | kubectl apply -f -
 
-# --- Secret per scaricare le immagini da ECR (token valido 12 ore) ---
+# --- Secret per scaricare le immagini da ECR. +++ RICORDA: token valido solo 12 ore
 kubectl -n mensa create secret docker-registry ecr-creds \
   --docker-server=$REGISTRY \
   --docker-username=AWS \

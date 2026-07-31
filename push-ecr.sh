@@ -1,7 +1,7 @@
 #!/bin/bash
-# Builda le immagini dei servizi e le carica su ECR.
-# Su AWS non serve copiare i tar nei nodi come in locale: c'e' un registry.
-# Uso: ./push-ecr.sh [tag]   (default: 1.0)
+# Questo file builda le immagini dei servizi e le carica su ECR
+# Su AWS non serve copiare i tar nei nodi come in locale perché  c'e' un registry
+# Usa con ./push-ecr.sh [tag]   (default: 1.0)
 set -e
 
 TAG="${1:-1.0}"

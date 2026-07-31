@@ -1,4 +1,4 @@
-# kitchen-service: consuma gli eventi ordine da RabbitMQ.
+# kitchen-service: consuma gli eventi ordine da RabbitMQ
 # In locale "notifica" = riga di log; in Fase 2 (AWS) al suo posto ci sara' SNS.
 import os
 import json
@@ -32,7 +32,7 @@ def on_message(ch, method, properties, body):
 
 
 def main():
-    # RabbitMQ potrebbe non essere ancora pronto: riprova ogni 5 secondi
+    #Inserito per effettuare una prova ogni 5 secondi se RABBITMQ non è pronto
     while True:
         try:
             conn = pika.BlockingConnection(pika.URLParameters(RABBITMQ_URL))

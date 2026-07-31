@@ -21,7 +21,6 @@ terraform {
   }
 
   # Stato remoto, S3 lo conserva, DynamoDB impedisce apply simultanei
-  # Bucket e tabella creati una sola volta con la AWS CLI
   backend "s3" {
     bucket         = "mensa-tfstate-862087104689"
     key            = "mensa/aws/terraform.tfstate"
@@ -42,7 +41,7 @@ provider "aws" {
   }
 }
 
-# ---------------------------------------------------------------- variabili
+# ---------------------- variabili
 
 variable "region" {
   type    = string
@@ -86,7 +85,7 @@ variable "ssh_public_key_path" {
   default = "~/.ssh/id_rsa.pub"
 }
 
-# ------------------------------------------------------------------- rete
+# ----------------- rete
 # VPC dedicata con due subnet pubbliche.
 # Niente NAT Gateway, i nodi stanno in subnet pubbliche e protetti dai security_groups
 #senza la vpc rds e ElastiCache non darebbero un endpoint DNS risolvibile
@@ -168,7 +167,7 @@ resource "aws_security_group" "nodes" {
     cidr_blocks = [var.vpc_cidr, var.my_ip_cidr]
   }
 
-  # Traffico interno al cluster (kubelet, etcd, Flannel VXLAN...)
+  # Traffico interno al cluster
   ingress {
     description = "Traffico tra i nodi"
     from_port   = 0
@@ -187,7 +186,7 @@ resource "aws_security_group" "nodes" {
   tags = { Name = "${var.project}-nodes-sg" }
 }
 
-# ---- Security group dei servizi gestiti: accessibili solo dai nodi ----
+# ---- Security group dei servizi gestiti: accessibili solo dai nodi-
 resource "aws_security_group" "data" {
   name        = "${var.project}-data"
   description = "RDS, ElastiCache, Amazon MQ"
@@ -227,9 +226,9 @@ resource "aws_security_group" "data" {
   tags = { Name = "${var.project}-data-sg" }
 }
 
-# ------------------------------------------------------------------- dati
+# ---------------------------------------------------------- dati
 # Bucket S3 per le foto dei piatti: sostituisce il volume locale della Fase 1
-# (nel codice basta STORAGE_BACKEND=s3, nessuna modifica applicativa).
+# nel codice basta STORAGE_BACKEND=s3, nessuna modifica applicativa.
 
 resource "aws_s3_bucket" "images" {
   bucket        = "${var.project}-images-${data.aws_caller_identity.current.account_id}"
@@ -246,7 +245,7 @@ resource "aws_s3_bucket_public_access_block" "images" {
 }
 
 # Password generate da Terraform, non scritte nel codice.
-# special = false per non rompere il parsing delle URL di connessione
+# special = false  è stato inserito per non rompere il parsing delle URL di connessione
 resource "random_password" "db" {
   length  = 20
   special = false
@@ -268,7 +267,7 @@ resource "aws_elasticache_subnet_group" "main" {
   subnet_ids = aws_subnet.public[*].id
 }
 
-# ---- RDS PostgreSQL: sostituisce il pod postgres ----
+# ---- RDS PostgreSQL: qui sostituisce il pod postgres della fase locale ----
 resource "aws_db_instance" "postgres" {
   identifier     = "${var.project}-db"
   engine         = "postgres"
@@ -292,7 +291,7 @@ resource "aws_db_instance" "postgres" {
   tags = { Name = "${var.project}-db" }
 }
 
-# ---- ElastiCache Redis: tabellone cucina ----
+# --- ElastiCache Redis: tabellone cucina --
 resource "aws_elasticache_cluster" "redis" {
   cluster_id           = "${var.project}-redis"
   engine               = "redis"
@@ -307,10 +306,9 @@ resource "aws_elasticache_cluster" "redis" {
   tags = { Name = "${var.project}-redis" }
 }
 
-# ---- Amazon MQ per RabbitMQ: coda eventi ordine ----
+# --- Amazon MQ per RabbitMQ: coda eventi ordine --
 # AWS non supporta piu' mq.t3.micro con RabbitMQ: mq.m7g.medium e' il taglio
-# piu' economico disponibile. Amazon MQ usa AMQPS (TLS) sulla porta 5671,
-# non 5672 in chiaro: pika gestisce amqps:// senza modifiche al codice.
+# piu' economico disponibile. Amazon MQ usa AMQPS (TLS) sulla porta 5671, non 5672 in chiaro
 resource "aws_mq_broker" "rabbitmq" {
   broker_name        = "${var.project}-mq"
   engine_type        = "RabbitMQ"
@@ -331,9 +329,9 @@ resource "aws_mq_broker" "rabbitmq" {
   tags = { Name = "${var.project}-mq" }
 }
 
-# ---- SSM Parameter Store: connection string dei servizi gestiti ----
+# -- SSM Parameter Store: connection string dei servizi gestiti --
 # Lo script di deploy le legge da qui e crea il Secret Kubernetes:
-# nessuna credenziale nel repo o nei manifest.
+# non viene caricata nessuna credenziale nel repo o nei manifest
 resource "aws_ssm_parameter" "database_url" {
   name  = "/${var.project}/DATABASE_URL"
   type  = "SecureString"
@@ -353,8 +351,8 @@ resource "aws_ssm_parameter" "rabbitmq_url" {
   value = "amqps://mensa:${random_password.mq.result}@${replace(aws_mq_broker.rabbitmq.instances[0].endpoints[0], "amqps://", "")}"
 }
 
-# --------------------------------------------------------------- computing
-# Tre istanze EC2 (1 control plane + 2 worker): stesso ruolo delle VM
+# ----------------------------- computing
+# Ci sono Tre istanze EC2 (1 control plane + 2 worker) hanno lo stesso ruolo delle VM su local
 
 # AMI Ubuntu 22.04 piu' recente
 data "aws_ami" "ubuntu" {
@@ -491,7 +489,7 @@ resource "aws_ecr_repository" "services" {
   force_delete         = true # comodo in un progetto didattico: destroy senza svuotare a mano
 }
 
-# ---- Inventory Ansible generato con gli IP reali delle istanze ----
+# -- Inventory Ansible generato con gli IP reali delle istanze --
 resource "local_file" "ansible_inventory" {
   filename = "${path.module}/ansible/inventory.ini"
 
@@ -515,7 +513,7 @@ resource "local_file" "ansible_inventory" {
   EOT
 }
 
-# ------------------------------------------------------------------ output
+# --------------------- output
 
 output "control_plane_ip" {
   value = aws_instance.control_plane.public_ip
@@ -574,8 +572,7 @@ resource "aws_s3_bucket_policy" "images_public_read" {
 }
 
 # ---------------------------------------------------------------- CI/CD
-# GitHub Actions si autentica su AWS con OIDC: niente chiavi statiche nei
-# secret del repository, solo credenziali temporanee (1 ora).
+# GitHub Actions si autentica su AWS con OIDC: niente chiavi statiche nei secret del repository, solo credenziali temporanee disponibili per 1 ora
 
 variable "github_repo" {
   description = "owner/repo autorizzato ad assumere il ruolo"
@@ -604,7 +601,10 @@ resource "aws_iam_role" "github_actions" {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
         }
         StringLike = {
-          "token.actions.githubusercontent.com:sub" = "repo:vitomarino02-del/*"
+          "token.actions.githubusercontent.com:sub" = [
+            "repo:${var.github_repo}:*",
+            "repo:vitomarino02-del@*/Cloud-Mensa-AWS-Version@*:*"
+          ]
         }
       }
     }]
@@ -650,7 +650,7 @@ resource "aws_iam_role_policy" "github_actions" {
   })
 }
 
-# Serve perche' SSM possa eseguire comandi sulle istanze
+# Serve affinché SSM possa eseguire comandi sulle istanze
 resource "aws_iam_role_policy_attachment" "ssm_core" {
   role       = aws_iam_role.node.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
