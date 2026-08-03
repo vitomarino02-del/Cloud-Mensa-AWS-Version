@@ -8,9 +8,10 @@ La cosa che mi interessava dimostrare è che **il codice dell'applicazione non �
 cambiato di una riga**. Tutta la configurazione arriva dall'ambiente, quindi per
 passare dal cluster sul portatile ad AWS è bastato cambiare le variabili:
 `DATABASE_URL` ora punta a RDS invece che al pod postgres, `STORAGE_BACKEND`
-passa da `local` a `s3` e il codice boto3 presente nella versione locale inizia a scrivere su un bucket vero.
+passa da `local` a `s3` e il codice boto3 che avevo scritto in Fase 1 (e che fino
+a ieri non serviva a niente) inizia a scrivere su un bucket vero.
 
-![Architettura su AWS](architettura-aws.png)
+![Architettura su AWS](docs/architettura-aws.png)
 
 ## Com'è fatta
 
@@ -53,6 +54,8 @@ ansible/site.yml     installazione del cluster kubeadm sulle istanze
 k8s/                 manifest dell'app (immagini da ECR, ConfigMap + Secret)
 push-ecr.sh          build e push delle immagini
 deploy.sh            legge i segreti da SSM e applica i manifest
+up.sh / down.sh      avvio completo dell'ambiente e teardown
+.github/workflows/   pipeline CI/CD (build, push su ECR, rollout via SSM)
 menu-service/  order-service/  kitchen-service/  frontend/
 ```
 
@@ -62,7 +65,8 @@ Servono AWS CLI configurata, Terraform, Ansible, kubectl, Docker e una chiave SS
 in `~/.ssh/id_rsa`. Io lavoro da WSL2 perché Ansible su Windows nativo non gira.
 
 Il backend dello stato va creato a mano una volta sola, prima del primo `init`
-
+(problema dell'uovo e della gallina: Terraform non può creare il bucket in cui
+salverà il proprio stato):
 
 ```
 aws s3api create-bucket --bucket mensa-tfstate-<ACCOUNT_ID> --region eu-central-1 \
@@ -73,30 +77,27 @@ aws dynamodb create-table --table-name mensa-tfstate-lock \
   --billing-mode PAY_PER_REQUEST --region eu-central-1
 ```
 
-Poi il proprio IP pubblico, perché il security group apre SSH e API server solo a
-quell'indirizzo:
+Fatto quello, tutto il resto sta in uno script:
 
 ```
-echo "my_ip_cidr = \"$(curl -s https://checkip.amazonaws.com)/32\"" > terraform.tfvars
+bash up.sh
 ```
 
-E da lì in avanti:
-
-```
-terraform init && terraform apply
-cd ansible && ansible-playbook -i inventory.ini site.yml && cd ..
-bash push-ecr.sh
-bash deploy.sh
-```
+Rileva l'IP pubblico corrente (serve per i security group), crea l'infrastruttura,
+monta il cluster con Ansible, costruisce e carica le immagini su ECR, deploya
+l'applicazione e carica le foto dei piatti. Alla fine stampa l'URL del load
+balancer. Per spegnere tutto e azzerare la spesa: `bash down.sh`.
 
 Terraform genera da solo l'inventory di Ansible con gli IP delle istanze, quindi
-non c'è niente da copiare a mano fra un passaggio e l'altro. Alla fine `terraform
-output app_url` stampa l'indirizzo del load balancer.
+non c'è niente da copiare a mano fra un passaggio e l'altro.
 
 Avviso sui tempi: RDS ci ha messo mezz'ora buona a nascere e Amazon MQ una decina
-di minuti, quindi il primo `apply` non è una cosa da fare di fretta.
+di minuti, quindi `up.sh` non è una cosa da lanciare di fretta.
 
-## Imprevisti ed errori incontrati
+Da qui in poi, per aggiornare l'applicazione non serve più niente di tutto questo:
+basta un push su main e ci pensa GitHub Actions.
+
+## Cose scoperte strada facendo
 
 **mq.t3.micro non esiste più per RabbitMQ.** Amazon MQ lo supporta solo con
 ActiveMQ; per RabbitMQ il taglio più piccolo disponibile è `mq.m7g.medium`, che

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Carica le foto dei piatti da demo-images/ 
 # Uso: ./upload-images.sh [url-base]   default: http://localhost:8081
-# NB: sul cluster le foto stanno in un emptyDir -> dopo un riavvio del pod
+# NB: sul cluster le foto si trovano in un emptyDir -> dopo un riavvio del pod
 # menu-service vanno ricaricate (in Fase 2, con S3, sarebbero persistenti).
 set -e
 
