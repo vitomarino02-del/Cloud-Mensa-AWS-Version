@@ -2,40 +2,40 @@
 
 Questa è la seconda parte del progetto di Sistemi Cloud: la stessa applicazione
 della mensa universitaria, ma portata su AWS. La versione locale (Multipass +
-kubeadm) sta qui: https://github.com/vitomarino02-del/Cloud-Mensa
+kubeadm) si trova qui: https://github.com/vitomarino02-del/Cloud-Mensa
 
-La cosa che mi interessava dimostrare è che **il codice dell'applicazione non è
-cambiato di una riga**. Tutta la configurazione arriva dall'ambiente, quindi per
+La cosa che interessava dimostrare è che **il codice dell'applicazione non è
+cambiato molto **. Tutta la configurazione arriva dall'ambiente, quindi per
 passare dal cluster sul portatile ad AWS è bastato cambiare le variabili:
 `DATABASE_URL` ora punta a RDS invece che al pod postgres, `STORAGE_BACKEND`
-passa da `local` a `s3` e il codice boto3 che avevo scritto in Fase 1 (e che fino
-a ieri non serviva a niente) inizia a scrivere su un bucket vero.
+passa da `local` a `s3` e il codice boto3 che era presente in fase 1 (e li non era utilizzato) inizia qui a scrivere su un bucket vero.
 
 ![Architettura su AWS](docs/architettura-aws.png)
 
 ## Com'è fatta
 
 Il cluster Kubernetes gira su tre istanze EC2 — una control plane e due worker —
-montate con kubeadm tramite Ansible. Ho preferito questa strada a EKS: costa
-molto meno, mi permette di riusare quasi identico il playbook della Fase 1, ed è
+montate con kubeadm tramite Ansible. Ho preferito questa strada a EKS in quanto costa
+ meno e mi permette di riusare quasi identico il playbook della Fase 1, ed è
 esplicitamente indicata come alternativa nella traccia. Davanti c'è un Network
-Load Balancer che raccoglie il traffico e lo manda alla NodePort 30080 dei
-worker, quindi l'app ha un indirizzo pubblico senza dover esporre i nodi.
+Load Balancer che raccoglie il traffico e lo inoltra alla NodePort 30080 dei
+worker, cosi che l'app abbia un indirizzo pubblico senza dover esporre i nodi.
 
-I tre container di appoggio che in locale stavano dentro il cluster sono diventati
+I tre container di appoggio che in locale si trovavano dentro il cluster sono diventati
 servizi gestiti: PostgreSQL è su **RDS**, Redis su **ElastiCache**, RabbitMQ su
 **Amazon MQ**. Le foto dei piatti finiscono su **S3** invece che su un volume, e
-le immagini Docker stanno su **ECR** — sparisce quindi lo script che in locale
-copiava i tar dentro le VM, perché adesso i nodi fanno il pull da soli.
+le immagini Docker su **ECR**. Sparisce quindi lo script che in locale
+copiava i tar dentro le VM, perché adesso i nodi fanno il pull autonomamente.
 
-Un dettaglio su cui ho perso un po' di tempo: Amazon MQ parla AMQPS su TLS, porta
+## NOTA
+: Un dettaglio su cui ho perso un po' di tempo: Amazon MQ parla AMQPS su TLS, porta
 5671, non 5672 in chiaro come RabbitMQ in locale. Fortunatamente `pika` gestisce
 `amqps://` senza modifiche, quindi è bastato cambiare la stringa di connessione.
 
 ## Le password
 
 Non c'è nessuna credenziale nel repository, ed è una cosa a cui ho fatto
-attenzione fin dall'inizio. Le password se le genera Terraform (`random_password`),
+attenzione fin dall'inizio. Le password sono generate da Terraform (`random_password`),
 poi le scrive cifrate su **SSM Parameter Store** insieme agli endpoint. Quando
 lancio `deploy.sh`, lo script le rilegge da lì e crea il Secret di Kubernetes al
 volo. Anche lo stato di Terraform — che le contiene in chiaro — non è versionato:
@@ -59,7 +59,7 @@ up.sh / down.sh      avvio completo dell'ambiente e teardown
 menu-service/  order-service/  kitchen-service/  frontend/
 ```
 
-## Come si tira su
+## Come si avvia per la prima volta
 
 Servono AWS CLI configurata, Terraform, Ansible, kubectl, Docker e una chiave SSH
 in `~/.ssh/id_rsa`. Io lavoro da WSL2 perché Ansible su Windows nativo non gira.
@@ -77,7 +77,7 @@ aws dynamodb create-table --table-name mensa-tfstate-lock \
   --billing-mode PAY_PER_REQUEST --region eu-central-1
 ```
 
-Fatto quello, tutto il resto sta in uno script:
+Fatto quello, tutto il resto è in uno script, che bisogna lanciare da riga di comando
 
 ```
 bash up.sh
@@ -91,8 +91,7 @@ balancer. Per spegnere tutto e azzerare la spesa: `bash down.sh`.
 Terraform genera da solo l'inventory di Ansible con gli IP delle istanze, quindi
 non c'è niente da copiare a mano fra un passaggio e l'altro.
 
-Avviso sui tempi: RDS ci ha messo mezz'ora buona a nascere e Amazon MQ una decina
-di minuti, quindi `up.sh` non è una cosa da lanciare di fretta.
+Avviso sui tempi: RDS ci ha messo circa 30 minuti a nascere e Amazon MQ circa 10 minuti, quindi `up.sh` va lanciato con attenzione.
 
 Da qui in poi, per aggiornare l'applicazione non serve più niente di tutto questo:
 basta un push su main e ci pensa GitHub Actions.
@@ -103,7 +102,7 @@ basta un push su main e ci pensa GitHub Actions.
 ActiveMQ; per RabbitMQ il taglio più piccolo disponibile è `mq.m7g.medium`, che
 costa comunque un decimo di `m5.large`. Il primo `apply` è fallito proprio lì.
 
-**Niente NAT Gateway.** Costa una trentina di dollari al mese fissi e per questo
+**Niente NAT Gateway.** Costa circa 30 $al mese fissi e per questo
 progetto non serve: i nodi stanno in subnet pubbliche e sono protetti dai security
 group, con SSH e API server aperti solo al mio IP.
 
