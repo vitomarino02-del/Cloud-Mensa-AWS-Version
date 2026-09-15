@@ -29,7 +29,7 @@ class Dish(db.Model):
     di avvio e' casuale e la tabella la crea il primo servizio che parte."""
     __tablename__ = "dishes"
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(120), nullable=False)
+    name = db.Column(db.String(120), nullable=False, unique=True)
     description = db.Column(db.String(255))
     price = db.Column(db.Numeric(6, 2), nullable=False, default=0)
     category = db.Column(db.String(40), default="primo")
