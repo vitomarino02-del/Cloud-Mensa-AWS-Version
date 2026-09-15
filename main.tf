@@ -158,13 +158,13 @@ resource "aws_security_group" "nodes" {
     cidr_blocks = [var.my_ip_cidr]
   }
 
-  # NodePort dell'app raggiunta dal load balancer e dal proprio IP
+  # NodePort dell'app pubblica aperta a tutti
   ingress {
     description = "NodePort frontend"
     from_port   = 30080
     to_port     = 30080
     protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr, var.my_ip_cidr]
+    cidr_blocks = ["0.0.0.0/0"] 
   }
 
   # Traffico interno al cluster
