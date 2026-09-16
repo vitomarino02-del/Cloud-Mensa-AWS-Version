@@ -62,10 +62,10 @@ menu-service/  order-service/  kitchen-service/  frontend/
 ## Come si avvia per la prima volta
 
 Servono AWS CLI configurata, Terraform, Ansible, kubectl, Docker e una chiave SSH
-in `~/.ssh/id_rsa`. Io lavoro da WSL2 perché Ansible su Windows nativo non gira.
+in `~/.ssh/id_rsa`. 
 
 Il backend dello stato va creato a mano una volta sola, prima del primo `init`
-(problema dell'uovo e della gallina: Terraform non può creare il bucket in cui
+(Terraform non può creare il bucket in cui
 salverà il proprio stato):
 
 ```
