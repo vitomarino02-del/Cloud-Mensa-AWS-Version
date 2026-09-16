@@ -10,7 +10,7 @@ passare dal cluster sul portatile ad AWS è bastato cambiare le variabili:
 `DATABASE_URL` ora punta a RDS invece che al pod postgres, `STORAGE_BACKEND`
 passa da `local` a `s3` e il codice boto3 che era presente in fase 1 (e li non era utilizzato) inizia qui a scrivere su un bucket vero.
 
-![Architettura su AWS](docs/architettura-aws.png)
+![Architettura su AWS](docs/architettura-aws-aggiornata.png)
 
 ## Com'è fatta
 
