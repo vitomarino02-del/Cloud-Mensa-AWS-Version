@@ -144,7 +144,7 @@ resource "aws_security_group" "nodes" {
   vpc_id      = aws_vpc.main.id
 
   # SSH aperto: serve ad Ansible eseguito dai runner di GitHub Actions, che
-  # hanno IP sempre diversi (come nel laboratorio). L'accesso resta protetto
+  # hanno IP sempre diversi, L'accesso resta protetto
   # dalla chiave: le istanze non accettano password.
   ingress {
     description = "SSH"
@@ -155,7 +155,7 @@ resource "aws_security_group" "nodes" {
   }
 
   # API server Kubernetes aperto per kubectl dai runner; l'accesso richiede
-  # comunque i certificati del kubeconfig (conservato cifrato su SSM).
+  #  i certificati del kubeconfig (conservato cifrato su SSM).
   ingress {
     description = "kube-apiserver"
     from_port   = 6443
@@ -251,7 +251,7 @@ resource "aws_s3_bucket_public_access_block" "images" {
 }
 
 # Password generate da Terraform, non scritte nel codice.
-# special = false  è stato inserito per non rompere il parsing delle URL di connessione
+# special = false inserito per non rompere il parsing delle URL di connessione
 resource "random_password" "db" {
   length  = 20
   special = false
@@ -291,7 +291,7 @@ resource "aws_db_instance" "postgres" {
   vpc_security_group_ids = [aws_security_group.data.id]
   publicly_accessible    = false # raggiungibile solo dentro la VPC
 
-  skip_final_snapshot = true # in produzione sarebbe da evitare
+  skip_final_snapshot = true 
   apply_immediately   = true
 
   tags = { Name = "${var.project}-db" }
@@ -596,7 +596,7 @@ removed {
   lifecycle { destroy = false }
 }
 
-# Serve affinché SSM possa eseguire comandi sulle istanze
+# Serve a SSM per eseguire comandi sulle istanze
 resource "aws_iam_role_policy_attachment" "ssm_core" {
   role       = aws_iam_role.node.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"

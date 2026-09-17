@@ -1,6 +1,4 @@
 # Pipeline dell'infrastruttura AWS (Fase 2) - GitHub Actions.
-# Stessa struttura di infra.yml del repo del laboratorio
-# (unict-cloud-systems/github-actions-aws), con Terraform al posto di OpenTofu:
 #   plan      -> su ogni PR e push; sulla PR il plan diventa un commento
 #   provision -> solo su main, ATTENDE l'approvazione manuale (environment production)
 #   configure -> Ansible installa Kubernetes, kubeconfig salvato su SSM,
