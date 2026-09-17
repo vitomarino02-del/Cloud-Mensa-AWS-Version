@@ -3,7 +3,7 @@
 
 
 terraform {
-  required_version = ">= 1.6"
+  required_version = ">= 1.7" # i blocchi "removed" richiedono la 1.7
 
   required_providers {
     aws = {
@@ -64,11 +64,6 @@ variable "public_subnet_cidrs" {
   default = ["10.0.1.0/24", "10.0.2.0/24"]
 }
 
-# Indirizzo da cui si collega in SSH e all'app
-variable "my_ip_cidr" {
-  type        = string
-  description = "IP pubblico autorizzato per SSH"
-}
 
 variable "instance_type" {
   type    = string
@@ -83,6 +78,14 @@ variable "worker_count" {
 variable "ssh_public_key_path" {
   type    = string
   default = "~/.ssh/id_rsa.pub"
+}
+
+# Contenuto della chiave pubblica. La pipeline lo passa con TF_VAR_public_key
+# (secret SSH_PUBLIC_KEY), se vuoto legge il file del PC.
+variable "public_key" {
+  type      = string
+  default   = ""
+  sensitive = true
 }
 
 # ----------------- rete
@@ -140,22 +143,25 @@ resource "aws_security_group" "nodes" {
   description = "Nodi Kubernetes"
   vpc_id      = aws_vpc.main.id
 
-  # SSH solo dal proprio IP (per Ansible)
+  # SSH aperto: serve ad Ansible eseguito dai runner di GitHub Actions, che
+  # hanno IP sempre diversi (come nel laboratorio). L'accesso resta protetto
+  # dalla chiave: le istanze non accettano password.
   ingress {
     description = "SSH"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = [var.my_ip_cidr]
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # API server Kubernetes 
+  # API server Kubernetes aperto per kubectl dai runner; l'accesso richiede
+  # comunque i certificati del kubeconfig (conservato cifrato su SSM).
   ingress {
     description = "kube-apiserver"
     from_port   = 6443
     to_port     = 6443
     protocol    = "tcp"
-    cidr_blocks = [var.my_ip_cidr]
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   # NodePort dell'app pubblica aperta a tutti
@@ -368,7 +374,7 @@ data "aws_ami" "ubuntu" {
 # La chiave SSH del PC viene caricata su AWS e messa nelle istanze
 resource "aws_key_pair" "main" {
   key_name   = "${var.project}-key"
-  public_key = trimspace(file(pathexpand(var.ssh_public_key_path)))
+  public_key = var.public_key != "" ? trimspace(var.public_key) : trimspace(try(file(pathexpand(var.ssh_public_key_path)), ""))
 }
 
 # Ruolo IAM istanze, fa scaricare immagini da ECR e usare S3 senza mettere credenziali nel codice o nei pod
@@ -572,91 +578,26 @@ resource "aws_s3_bucket_policy" "images_public_read" {
 }
 
 # ---------------------------------------------------------------- CI/CD
-# GitHub Actions si autentica su AWS con OIDC: niente chiavi statiche nei secret del repository, solo credenziali temporanee disponibili per 1 ora
-
-variable "github_repo" {
-  description = "owner/repo autorizzato ad assumere il ruolo"
-  type        = string
-  default     = "vitomarino02-del/Cloud-Mensa-AWS-Version"
+# Il ruolo OIDC usato da GitHub Actions si crea a mano dalla console IAM
+#  La pipeline esegue apply e destroy di questo file e non deve poter cancellare il ruolo con cui essa stessa si autentica.
+# I blocchi "removed" tolgono le risorse da questo stato SENZA distruggerle su AWS.
+removed {
+  from = aws_iam_openid_connect_provider.github
+  lifecycle { destroy = false }
 }
 
-resource "aws_iam_openid_connect_provider" "github" {
-  url             = "https://token.actions.githubusercontent.com"
-  client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
+removed {
+  from = aws_iam_role.github_actions
+  lifecycle { destroy = false }
 }
 
-# Il ruolo puo' essere assunto SOLO dai workflow di questo repository
-resource "aws_iam_role" "github_actions" {
-  name = "${var.project}-github-actions"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Federated = aws_iam_openid_connect_provider.github.arn }
-      Action    = "sts:AssumeRoleWithWebIdentity"
-      Condition = {
-        StringEquals = {
-          "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-        }
-        StringLike = {
-          "token.actions.githubusercontent.com:sub" = [
-            "repo:${var.github_repo}:*",
-            "repo:vitomarino02-del@*/Cloud-Mensa-AWS-Version@*:*"
-          ]
-        }
-      }
-    }]
-  })
-}
-
-# Permessi minimi: push su ECR e invio comandi al control plane via SSM
-resource "aws_iam_role_policy" "github_actions" {
-  name = "${var.project}-github-actions-policy"
-  role = aws_iam_role.github_actions.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["ecr:GetAuthorizationToken"]
-        Resource = "*"
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "ecr:BatchCheckLayerAvailability",
-          "ecr:CompleteLayerUpload",
-          "ecr:InitiateLayerUpload",
-          "ecr:PutImage",
-          "ecr:UploadLayerPart",
-          "ecr:BatchGetImage"
-        ]
-        Resource = [for r in aws_ecr_repository.services : r.arn]
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["ec2:DescribeInstances"]
-        Resource = "*"
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["ssm:SendCommand", "ssm:GetCommandInvocation", "ssm:ListCommandInvocations"]
-        Resource = "*"
-      }
-    ]
-  })
+removed {
+  from = aws_iam_role_policy.github_actions
+  lifecycle { destroy = false }
 }
 
 # Serve affinché SSM possa eseguire comandi sulle istanze
 resource "aws_iam_role_policy_attachment" "ssm_core" {
   role       = aws_iam_role.node.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-}
-
-output "github_actions_role_arn" {
-  description = "Da inserire nel secret AWS_ROLE_ARN del repository"
-  value       = aws_iam_role.github_actions.arn
 }

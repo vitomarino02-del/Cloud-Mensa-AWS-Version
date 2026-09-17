@@ -1,0 +1,211 @@
+# Pipeline dell'infrastruttura AWS (Fase 2) - GitHub Actions.
+# Stessa struttura di infra.yml del repo del laboratorio
+# (unict-cloud-systems/github-actions-aws), con Terraform al posto di OpenTofu:
+#   plan      -> su ogni PR e push; sulla PR il plan diventa un commento
+#   provision -> solo su main, ATTENDE l'approvazione manuale (environment production)
+#   configure -> Ansible installa Kubernetes, kubeconfig salvato su SSM,
+#                primo deploy dell'applicazione
+# Secret: AWS_ROLE_ARN, SSH_PRIVATE_KEY, SSH_PUBLIC_KEY
+name: Provision K8s Cluster on AWS
+
+on:
+  push:
+    branches: [main]
+    paths: ['main.tf', 'ansible/**']
+  pull_request:
+    paths: ['main.tf', 'ansible/**']
+  workflow_dispatch:   # avvio manuale, utile quando cambiano solo i workflow
+
+permissions:
+  id-token: write        # OIDC
+  contents: read
+  pull-requests: write   # commento con il plan
+
+env:
+  AWS_REGION: eu-central-1
+  TF_VAR_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+
+jobs:
+  # ── plan: su ogni PR, pubblicato come commento ─────────────────────────────
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Credenziali AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: terraform init
+        run: terraform init -input=false
+
+      - name: terraform plan
+        run: terraform plan -input=false -no-color -out=tfplan 2>&1 | tee plan.txt
+
+      - name: Plan come commento sulla PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('plan.txt', 'utf8');
+            const truncated = plan.length > 60000 ? plan.slice(0, 60000) + '\n...(troncato)' : plan;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `### Terraform Plan\n\`\`\`\n${truncated}\n\`\`\``
+            });
+
+  # ── provision: apply dopo il merge su main ─────────────────────────────────
+  provision:
+    runs-on: ubuntu-latest
+    needs: plan
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    environment: production   # approvazione manuale prima di toccare AWS
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Credenziali AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: terraform init
+        run: terraform init -input=false
+
+      # RDS e Amazon MQ sono lenti: anche 30 minuti
+      - name: terraform apply
+        run: terraform apply -input=false -auto-approve
+
+      - name: Inventory Ansible dagli output di Terraform
+        run: |
+          CONTROL_PLANE_IP=$(terraform output -raw control_plane_ip)
+          WORKER_IPS=$(terraform output -json worker_ips | jq -r '.[]')
+
+          {
+            echo "[control_plane]"
+            echo "mensa-cp ansible_host=${CONTROL_PLANE_IP}"
+            echo ""
+            echo "[workers]"
+            i=1
+            while IFS= read -r ip; do
+              echo "mensa-worker-${i} ansible_host=${ip}"
+              i=$((i+1))
+            done <<< "$WORKER_IPS"
+            echo ""
+            echo "[k8s_cluster:children]"
+            echo "control_plane"
+            echo "workers"
+            echo ""
+            echo "[k8s_cluster:vars]"
+            echo "ansible_user=ubuntu"
+            echo "ansible_ssh_private_key_file=${GITHUB_WORKSPACE}/id_rsa"
+            echo "ansible_ssh_common_args=-o StrictHostKeyChecking=no"
+          } > hosts.ini
+
+          echo "=== Inventory generato ==="
+          cat hosts.ini
+
+      - name: Carica l'inventory come artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: k8s-inventory
+          path: hosts.ini
+          retention-days: 1
+
+  # ── configure: Kubernetes con Ansible, kubeconfig su SSM, primo deploy ──────
+  configure:
+    runs-on: ubuntu-latest
+    needs: provision
+    env:
+      TAG: ${{ github.sha }}   # tag delle immagini = commit
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Credenziali AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Scarica l'inventory
+        uses: actions/download-artifact@v4
+        with:
+          name: k8s-inventory
+          path: ansible
+
+      - name: Scrivi la chiave SSH privata
+        run: |
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > id_rsa
+          chmod 600 id_rsa
+
+      - name: Installa Ansible
+        run: pip install ansible
+
+      - name: Attendi che SSH risponda su tutti i nodi
+        run: |
+          while IFS= read -r line; do
+            ip=$(echo "$line" | grep -oP 'ansible_host=\K[0-9.]+' || true)
+            [ -z "$ip" ] && continue
+            echo "Attendo SSH su ${ip}..."
+            timeout 180 bash -c \
+              "until ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i id_rsa ubuntu@${ip} true 2>/dev/null; do sleep 10; done"
+          done < ansible/hosts.ini
+
+      # un solo playbook con tre play: prerequisiti, control plane, worker
+      - name: Configura il cluster con Ansible
+        working-directory: ansible
+        run: ansible-playbook -i hosts.ini site.yml
+
+      # site.yml scarica il kubeconfig in ansible/kubeconfig con l'IP pubblico
+      # del control plane gia' sostituito a quello privato
+      - name: Salva il kubeconfig su SSM Parameter Store
+        run: |
+          # tier Advanced: il kubeconfig supera il limite di 4096 caratteri
+          aws ssm put-parameter \
+            --name "/mensa/kubeconfig" \
+            --value "$(cat ansible/kubeconfig)" \
+            --type SecureString \
+            --tier Advanced \
+            --overwrite
+          KUBECONFIG=ansible/kubeconfig kubectl get nodes
+
+      - name: terraform init (per leggere gli output)
+        run: terraform init -input=false
+
+      - name: Pubblica le immagini su ECR
+        run: bash push-ecr.sh "$TAG"
+
+      # nei manifest il tag e' 1.0 (usato da up.sh): qui diventa lo SHA
+      - name: Primo deploy dell'applicazione
+        run: |
+          sed -i -E "s#(image: .*/mensa/(menu-service|order-service|kitchen-service|frontend)):.*#\1:$TAG#" k8s/*.yaml
+          bash deploy.sh
+          KUBECONFIG=ansible/kubeconfig kubectl -n mensa wait --for=condition=available --timeout=300s deployment --all
+
+      - name: Foto dei piatti
+        run: |
+          APP=$(terraform output -raw app_url)
+          # il load balancer impiega qualche minuto a dichiarare sani i worker
+          for i in $(seq 1 30); do
+            curl -sf "$APP/api/menu" > /dev/null && break
+            sleep 10
+          done
+          bash upload-images.sh "$APP"
+          echo "App su $APP" >> "$GITHUB_STEP_SUMMARY"

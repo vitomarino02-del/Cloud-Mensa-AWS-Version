@@ -1,0 +1,52 @@
+# Distrugge tutta l'infrastruttura AWS. Solo avvio manuale:
+# Actions -> Destroy AWS -> Run workflow, poi approvazione (production).
+# Il ruolo OIDC non viene toccato: e' stato creato a mano dalla console.
+name: Destroy AWS
+
+on:
+  workflow_dispatch:   # mai automatico
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-central-1
+
+jobs:
+  destroy:
+    runs-on: ubuntu-latest
+    environment: production   # approvazione manuale prima di distruggere
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Credenziali AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: terraform init
+        run: terraform init -input=false
+
+      - name: Cancella il kubeconfig su SSM (non gestito da Terraform)
+        run: |
+          aws ssm delete-parameter --name "/mensa/kubeconfig" \
+            && echo "kubeconfig su SSM cancellato" \
+            || echo "parametro non trovato, proseguo"
+
+      - name: terraform destroy
+        run: terraform destroy -input=false -auto-approve
+        env:
+          TF_VAR_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+
+      - name: Verifica che non resti nulla acceso
+        run: |
+          aws ec2 describe-instances \
+            --filters "Name=instance-state-name,Values=running" \
+            --query "Reservations[].Instances[].InstanceId" --output text

@@ -1,40 +1,57 @@
-name: build e deploy su AWS
+# Pipeline dell'applicazione (Fase 2) - GitHub Actions.
+# Come deploy.yml del laboratorio: il kubeconfig si legge da SSM e kubectl
+# gira sul runner. In piu', essendo immagini nostre, prima si costruiscono
+# e si pubblicano su ECR con tag = SHA del commit.
+# Parte quando cambiano i manifest o il codice dei servizi (o a mano).
+name: Deploy to Kubernetes
 
-# Ad ogni push su main: build delle immagini, push su ECR e aggiornamento
-# dei Deployment sul cluster.
 on:
   push:
     branches: [main]
-  workflow_dispatch: # avvio manuale dalla scheda Actions
+    paths:
+      - 'k8s/**'
+      - 'menu-service/**'
+      - 'order-service/**'
+      - 'kitchen-service/**'
+      - 'frontend/**'
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # OIDC
+  contents: read
 
 env:
   AWS_REGION: eu-central-1
   PROJECT: mensa
-
-permissions:
-  id-token: write # necessario per OIDC
-  contents: read
+  TAG: ${{ github.sha }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Debug claim OIDC
-        run: |
-          TOKEN=$(curl -sH "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value)
-          echo "$TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null | jq '{sub, aud}'
-
-      # Nessuna chiave AWS: il token OIDC di GitHub viene scambiato con
-      # credenziali temporanee del ruolo IAM.
-      - name: Autenticazione su AWS (OIDC)
+      # nessuna chiave AWS: il token OIDC diventa credenziali temporanee
+      - name: Credenziali AWS (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Installa kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Leggi il KUBECONFIG da SSM Parameter Store
+        run: |
+          aws ssm get-parameter \
+            --name "/mensa/kubeconfig" \
+            --with-decryption \
+            --query Parameter.Value \
+            --output text > kubeconfig
+          chmod 600 kubeconfig
+
+      - name: Verifica che il cluster risponda
+        run: KUBECONFIG=./kubeconfig kubectl get nodes
 
       - name: Login su ECR
         id: ecr
@@ -43,43 +60,35 @@ jobs:
       - name: Build e push delle immagini
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
-          TAG: ${{ github.sha }} # tag = commit, cosi' ogni deploy e' tracciabile
         run: |
           for s in menu-service order-service kitchen-service frontend; do
             docker build -t $REGISTRY/$PROJECT/$s:$TAG ./$s
             docker push $REGISTRY/$PROJECT/$s:$TAG
           done
 
-      # L'API server accetta connessioni solo dall'IP dello sviluppatore,
-      # quindi il deploy non parte dal runner: si esegue kubectl sul control
-      # plane tramite SSM Run Command.
-      - name: Aggiorna i Deployment sul cluster
+      # il token per scaricare da ECR dura 12 ore: lo si rinnova a ogni deploy
+      - name: Rinnova il secret ecr-creds
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
-          TAG: ${{ github.sha }}
         run: |
-          CP_ID=$(aws ec2 describe-instances \
-            --filters "Name=tag:Name,Values=$PROJECT-cp" "Name=instance-state-name,Values=running" \
-            --query "Reservations[0].Instances[0].InstanceId" --output text)
-          echo "control plane: $CP_ID"
+          KUBECONFIG=./kubeconfig kubectl -n mensa create secret docker-registry ecr-creds \
+            --docker-server=$REGISTRY \
+            --docker-username=AWS \
+            --docker-password="$(aws ecr get-login-password --region $AWS_REGION)" \
+            --dry-run=client -o yaml | KUBECONFIG=./kubeconfig kubectl apply -f -
 
-          CMD=$(aws ssm send-command \
-            --instance-ids "$CP_ID" \
-            --document-name "AWS-RunShellScript" \
-            --comment "deploy $TAG" \
-            --parameters commands="[
-              \"export KUBECONFIG=/etc/kubernetes/admin.conf\",
-              \"kubectl -n mensa delete secret ecr-creds --ignore-not-found\",
-              \"kubectl -n mensa create secret docker-registry ecr-creds --docker-server=$REGISTRY --docker-username=AWS --docker-password=\$(aws ecr get-login-password --region $AWS_REGION)\",
-              \"kubectl -n mensa set image deployment/menu-service menu-service=$REGISTRY/$PROJECT/menu-service:$TAG\",
-              \"kubectl -n mensa set image deployment/order-service order-service=$REGISTRY/$PROJECT/order-service:$TAG\",
-              \"kubectl -n mensa set image deployment/kitchen-service kitchen-service=$REGISTRY/$PROJECT/kitchen-service:$TAG\",
-              \"kubectl -n mensa set image deployment/frontend frontend=$REGISTRY/$PROJECT/frontend:$TAG\",
-              \"kubectl -n mensa rollout status deployment/frontend --timeout=180s\"
-            ]" \
-            --query "Command.CommandId" --output text)
+      # nei manifest il tag e' 1.0 (usato da up.sh): qui diventa lo SHA
+      - name: Applica i manifest
+        run: |
+          sed -i -E "s#(image: .*/mensa/(menu-service|order-service|kitchen-service|frontend)):.*#\1:$TAG#" k8s/*.yaml
+          grep -h "image:" k8s/*.yaml
+          KUBECONFIG=./kubeconfig kubectl apply -f k8s/
 
-          echo "comando SSM: $CMD"
-          sleep 60
-          aws ssm get-command-invocation --command-id "$CMD" --instance-id "$CP_ID" \
-            --query "{stato:Status,output:StandardOutputContent,errore:StandardErrorContent}"
+      - name: Attendi il rollout
+        run: |
+          for d in menu-service order-service kitchen-service frontend; do
+            KUBECONFIG=./kubeconfig kubectl -n mensa rollout status deployment/$d --timeout=180s
+          done
+
+      - name: Pod in esecuzione
+        run: KUBECONFIG=./kubeconfig kubectl -n mensa get pods -o wide
