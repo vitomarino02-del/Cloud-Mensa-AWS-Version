@@ -5,7 +5,7 @@ export default function App() {
   const [tab, setTab] = useState('menu')
   return (
     <div className="app">
-      <h1>🍝 Mensa Universitaria</h1>
+      <h1>🍝 Mensa Universitaria - AWS</h1>
       <div className="muted" style={{ color: '#9db4d0' }}>Ordina, paga alla cassa, ritira quando pronto</div>
       <div className="tabs">
         <button className={tab === 'menu' ? 'on' : ''} onClick={() => setTab('menu')}>Menu & Ordina</button>
