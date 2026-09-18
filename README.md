@@ -10,7 +10,7 @@ passare dal cluster sul portatile ad AWS è bastato cambiare le variabili:
 `DATABASE_URL` ora punta a RDS invece che al pod postgres, `STORAGE_BACKEND`
 passa da `local` a `s3` e il codice boto3 che era presente in fase 1 (e li non era utilizzato) inizia qui a scrivere su un bucket vero.
 
-![Architettura su AWS](docs/architettura-aws-aggiornata.png)
+![Architettura su AWS](docs/architettura-aws-aggiornata1.png)
 
 ## Com'è fatta
 
@@ -196,11 +196,9 @@ group.
 
 **SSH e API server aperti.** All'inizio le porte 22 e 6443 erano aperte solo al mio
 IP e il deploy passava da SSM Run Command, eseguendo `kubectl` direttamente sul
-control plane. Per allinearmi al laboratorio ora sono aperte come in
-`github-actions-aws`: i runner di GitHub hanno IP sempre diversi e devono raggiungere
+control plane. Per consentire la costruzione dell'infrastruttura da CI/CD sono aperte  i runner di GitHub hanno IP sempre diversi e devono raggiungere
 i nodi con Ansible e `kubectl`. La protezione resta nella chiave SSH (niente password)
-e nei certificati del kubeconfig, che sta cifrato su SSM e non nel repo. La versione
-con Run Command resta l'alternativa più restrittiva.
+e nei certificati del kubeconfig, che sta cifrato su SSM e non nel repo. 
 
 **Il token di ECR dura 12 ore.** Il Secret `ecr-creds` che permette a Kubernetes
 di scaricare le immagini va rigenerato: lo fa la pipeline `deploy.yml` a ogni esecuzione (a mano basta
