@@ -4,7 +4,7 @@
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="t3" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontSize=14;fontStyle=1;fontColor=#232F3E;" value="CI/CD con GitHub Actions&lt;br&gt;&lt;span style=&quot;font-weight:normal;font-size:12px&quot;&gt;infra.yml: Terraform + Ansible (approvazione manuale)&lt;br&gt;deploy.yml: build, push su ECR, kubectl apply&lt;br&gt;destroy.yml: solo manuale&lt;/span&gt;" vertex="1">
+        <mxCell id="t3" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontSize=14;fontStyle=1;fontColor=#232F3E;" value="CI/CD con GitHub Actions&lt;div&gt;&lt;br/&gt;&lt;/div&gt;" vertex="1">
           <mxGeometry height="90" width="360" x="35" y="1010" as="geometry" />
         </mxCell>
         <mxCell id="utente" parent="1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#232F3E;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.user;" value="Utente&#xa;(browser)" vertex="1">
